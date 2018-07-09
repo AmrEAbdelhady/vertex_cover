@@ -4,6 +4,10 @@ import java.util.*;
 
 import tc.wata.data.*;
 import tc.wata.debug.*;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.*;
+
 
 public class VCSolver {
 	
@@ -16,6 +20,8 @@ public class VCSolver {
 	public static int BRANCHING = 2;
 	
 	public static boolean outputLP = true;
+
+	public static boolean timing = false;
 	
 	public static long nBranchings;
 	
@@ -529,27 +535,33 @@ public class VCSolver {
 	
 	boolean twinReduction() {
 		try (Stat stat = new Stat("reduce_twin")) {
-			int oldn = rn;
+			int remaining_nodes = rn;
 			int[] used = iter;
-			int uid = 0;
-			int[] NS = new int[3];
+			int adj_id = 0;
+			// creating a list for storing v's neighbours to refer back to them when need be
+			int[] neighbors = new int[3];
 			for (int i = 0; i < n; i++) used[i] = 0;
+			// for every node, if it's not determined whether or not it's going to be in the vc and its degree = 3
 			loop : for (int v = 0; v < n; v++) if (x[v] < 0 && deg(v) == 3) {
-				int p = 0;
+				int neighbor_order = 0;
+				// look at v's adjacents and check them only if undetermined yet
 				for (int u : adj[v]) if (x[u] < 0) {
-					NS[p++] = u;
-					uid++;
+					neighbors[neighbor_order++] = u;
+					adj_id++;
+					// check adjacents of adjacents, not including the original v: if undetermined 
 					for (int w : adj[u]) if (x[w] < 0 && w != v) {
-						if (p == 1) used[w] = uid;
-						else if (used[w] == uid - 1) {
+						// if u is v's first neighbour
+						if (neighbor_order == 1) used[w] = adj_id;
+						else if (used[w] == adj_id - 1) {
 							used[w]++;
-							if (p == 3 && deg(w) == 3) {
-								uid++;
-								for (int z : NS) used[z] = uid;
+							// is w a twin for v?
+							if (neighbor_order == 3 && deg(w) == 3) {
+								adj_id++;
+								for (int z : neighbors) used[z] = adj_id;
 								boolean ind = true;
-								for (int z : NS) for (int a : adj[z]) if (x[a] < 0 && used[a] == uid) ind = false;
+								for (int z : neighbors) for (int a : adj[z]) if (x[a] < 0 && used[a] == adj_id) ind = false;
 								if (ind) {
-									fold(new int[]{v, w}, NS.clone());
+									fold(new int[]{v, w}, neighbors.clone());
 								} else {
 									set(v, 0);
 									set(w, 0);
@@ -560,9 +572,9 @@ public class VCSolver {
 					}
 				}
 			}
-			if (debug >= 3 && depth <= maxDepth && oldn != rn) debug("twin: %d -> %d%n", oldn, rn);
-			if (oldn != rn) Stat.count("reduceN_twin", oldn - rn);
-			return oldn != rn;
+			if (debug >= 3 && depth <= maxDepth && remaining_nodes != rn) debug("twin: %d -> %d%n", remaining_nodes, rn);
+			if (remaining_nodes != rn) Stat.count("reduceN_twin", remaining_nodes - rn);
+			return remaining_nodes != rn;
 		}
 	}
 	
@@ -867,7 +879,7 @@ public class VCSolver {
 		}
 	}
 	
-	void branching() {
+	void branching(String output_file) {
 		int oldLB = lb;
 		int v = -1, dv = 0;
 		int[] mirrors = que;
@@ -949,7 +961,7 @@ public class VCSolver {
 			else debug("branch (%d): 1%n", dv);
 		}
 		depth++;
-		rec();
+		rec(output_file);
 		while (packing.size() > oldP) packing.remove(packing.size() - 1);
 		lb = oldLB;
 		depth--;
@@ -993,7 +1005,7 @@ public class VCSolver {
 		set(v, 0);
 		if (debug >= 2 && depth <= maxDepth) debug("branch (%d): 0%n", dv);
 		depth++;
-		rec();
+		rec(output_file);
 		while (packing.size() > oldP) packing.remove(packing.size() - 1);
 		lb = oldLB;
 		depth--;
@@ -1113,7 +1125,7 @@ public class VCSolver {
 		}
 	}
 	
-	boolean decompose() {
+	boolean decompose(String output_file) {
 		int[][] vss;
 		try (Stat stat = new Stat("decompose")) {
 			int[] id = level;
@@ -1367,7 +1379,7 @@ public class VCSolver {
 			}
 			vc.reverse();
 			for (int j = 0; j < vc.N; j++) Debug.check(vc.y[j] == 0 || vc.y[j] == 1);
-			vc.solve();
+			vc.solve(output_file);
 			sum += vc.opt;
 			for (int j = 0; j < vc.N - 2; j++) {
 				x2[vss2[i][j]] = vc.y[j];
@@ -1417,17 +1429,49 @@ public class VCSolver {
 		return lb;
 	}
 	
-	boolean reduce() {
+	void write(long total_time, int size_reduction, String output_file){
+		try{
+			File file = new File(output_file);
+			FileWriter writer = new FileWriter(file, true);
+			writer.write(String.valueOf(total_time) + "," + String.valueOf(size_reduction) + '\n');
+			writer.close();
+		} catch (java.io.IOException e){
+			System.err.println("Unable to open file " );
+		}
+		
+	}
+	boolean reduce(String output_file) {
+		if (timing)
+			System.out.println("double timing");
+		timing = true;
+		long time1 = System.currentTimeMillis();
+		long deductable_time = 0;
+		int rn_before = rn;
 		int oldn = rn;
+		
 		for (;;) {
 			if (REDUCTION >= 0) deg1Reduction();
-			if (n > 100 && n * SHRINK >= rn && !outputLP && decompose()) return true;
+			long time_pause = System.currentTimeMillis();
+			if (n > 100 && n * SHRINK >= rn && !outputLP && false){
+				long total_time = (System.currentTimeMillis() - time1) - deductable_time; 
+				int reduction = rn - rn_before;
+				write(total_time, reduction, output_file);
+				timing = false;
+				return true;
+			} 
+			deductable_time +=  (System.currentTimeMillis() - time_pause);
 			if (REDUCTION >= 0 && REDUCTION < 2 && dominateReduction()) continue;
 			if (REDUCTION >= 2 && unconfinedReduction()) continue;
 			if (REDUCTION >= 1 && lpReduction()) continue;
 			if (REDUCTION >= 3) {
 				int r = packingReduction();
-				if (r < 0) return true;
+				if (r < 0){
+					long total_time = (System.currentTimeMillis() - time1) - deductable_time;
+					int reduction = rn - rn_before;
+					write(total_time, reduction, output_file);
+					timing = false;
+					return true;
+				} 
 				if (r > 0) continue;
 			}
 			if (REDUCTION >= 1 && fold2Reduction()) continue;
@@ -1437,12 +1481,16 @@ public class VCSolver {
 			break;
 		}
 		if (debug >= 2 && depth <= maxDepth && oldn != rn) debug("reduce: %d -> %d%n", oldn, rn);
+		long total_time = (System.currentTimeMillis() - time1) - deductable_time;
+		int reduction = rn - rn_before;
+		write(total_time, reduction, output_file);
+		timing = false;
 		return false;
 	}
 	
-	void rec() {
+	void rec(String output_file) {
 		if (REDUCTION < 3) Debug.check(packing.size() == 0);
-		if (reduce()) return;
+		if (reduce(output_file)) return;
 		if (lowerBound() >= opt) return;
 		if (rn == 0) {
 			if (debug >= 2 && rootDepth <= maxDepth) debug("opt: %d -> %d%n", opt, crt);
@@ -1451,8 +1499,8 @@ public class VCSolver {
 			reverse();
 			return;
 		}
-		if (decompose()) return;
-		branching();
+		if (decompose(output_file)) return;
+		branching(output_file);
 	}
 	
 	void debug(String str, Object...os) {
@@ -1464,7 +1512,7 @@ public class VCSolver {
 		System.err.printf(str, os);
 	}
 	
-	public int solve() {
+	public int solve(String output_file) {
 		if (LOWER_BOUND >= 2 && REDUCTION <= 0 && !outputLP) {
 			System.err.println("LP/cycle lower bounds require LP reduction.");
 			Debug.check(false);
@@ -1474,12 +1522,12 @@ public class VCSolver {
 			if (REDUCTION < 0) {
 				lpReduction();
 			} else {
-				reduce();
+				reduce(output_file);
 			}
 			System.out.printf("%.1f%n", crt + rn / 2.0);
 			return opt;
 		}
-		rec();
+		rec(output_file);
 		if (debug >= 2 && depth <= maxDepth) debug("opt: %d%n", opt);
 		return opt;
 	}
