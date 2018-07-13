@@ -1,13 +1,13 @@
 import static java.util.Arrays.*;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 import tc.wata.data.*;
 import tc.wata.debug.*;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.*;
-
 
 public class VCSolver {
 	
@@ -18,15 +18,39 @@ public class VCSolver {
 	public static int LOWER_BOUND = 4;
 	
 	public static int BRANCHING = 2;
+
+	// public static long totalUnconfined;
+
+	// public static long repeatUnconfined;
+
+	// public static long confinedNeighbors;
 	
 	public static boolean outputLP = true;
-
-	public static boolean timing = false;
 	
 	public static long nBranchings;
 	
 	public static int debug;
-	int depth = 0, maxDepth = 10, rootDepth;
+
+	public static long start;//set start time frame
+
+	public static long current;//test what is the current time;
+
+	public static long timeFrame;//timeFrame
+
+	public static boolean timing = false;
+
+
+	public DequeArr deque;
+
+	// public boolean dequeInit;
+
+	public int[] deg;
+
+	public static boolean newSetMode = true;
+        
+    // public static long counter = (long)0;
+
+	int depth = 0, maxDepth = 20, rootDepth;
 	
 	double SHRINK = 0.5;
 	
@@ -62,6 +86,68 @@ public class VCSolver {
 	 * Packing constraints
 	 */
 	ArrayList<int[]> packing;
+
+	public class DequeArr {
+		public FastSet dequeSet;
+		public int leftP;
+		public int rightP;
+		public int[] arr;
+		public DequeArr(int size) {
+			dequeSet = new FastSet(size * 2);
+			arr = new int[size * 8];//to prevent out of bound
+			leftP = -1;
+			rightP = arr.length;
+		}
+		public int degV() {
+			if (leftP >= 0) {
+				int v = arr[leftP];
+				dequeSet.remove(v);
+				leftP--;
+				return v;
+			}
+			return -1;
+		}
+		public int unConV() {
+			if (rightP < arr.length) {
+				int v = arr[rightP];
+				dequeSet.remove(v);
+				rightP++;
+				return v;
+			}
+			return -1;
+		}
+		public void addDeg(int v) {
+			arr[++leftP] = v;
+		}
+		public void addUncon(int v) {
+			arr[--rightP] = v;
+		}
+		public void clear() {
+			leftP = -1;
+			rightP = arr.length;
+			dequeSet.clear();
+		}
+		public boolean isDegEmpty() {
+			return leftP == -1;
+		}
+		public boolean isUnconEmpty() {
+			return rightP == arr.length;
+		}
+		public boolean isEmpty() {
+			return isDegEmpty()&&isUnconEmpty();
+		}
+		public void add(int v) {
+                    if (!dequeSet.add(v)) {
+                            return;
+                    }
+                     if (degLessThanTwo(v)) {
+                        addDeg(v);
+                    }
+                    else {
+                        addUncon(v);
+                    }
+		}
+	}
 	
 	public VCSolver(int[][] adj, int N) {
 		n = adj.length;
@@ -69,15 +155,23 @@ public class VCSolver {
 		this.adj = adj;
 		opt = n;
 		y = new int[N];
-		for (int i = 0; i < n; i++) y[i] = 1;
-		for (int i = n; i < N; i++) y[i] = 2;
+		deque = new DequeArr(n);
+		for (int i = 0; i < n; i++) y[i] = 1;//Why set to 1 in the vc 
+		for (int i = n; i < N; i++) y[i] = 2;//whats the difference between x and y
 		crt = 0;
 		x = new int[N];
-		for (int i = 0; i < n; i++) x[i] = -1;
+		for (int i = 0; i < n; i++) x[i] = -1;//difference beteween n and N
 		for (int i = n; i < N; i++) x[i] = 2;
 		rn = n;
 		used = new FastSet(n * 2);
-		restore = new int[n];
+		deg = new int[n*2];
+        if (newSetMode) {
+            for (int v = 0; v < n; v++) if (x[v] < 0) {
+                    // deg[v] = n == rn ? adj[v].length : deg(v);
+                    deque.add(v);
+            }
+        }
+		restore = new int[n];//what does restore do
 		modifieds = new Modified[N];
 		modifiedN = 0;
 		in = new int[n];
@@ -91,7 +185,7 @@ public class VCSolver {
 		modTmp = new int[n];
 	}
 	
-	FastSet used;
+	FastSet used;//a new used set
 	
 	int deg(int v) {
 		Debug.check(x[v] < 0);
@@ -99,10 +193,44 @@ public class VCSolver {
 		for (int u : adj[v]) if (x[u] < 0) deg++;
 		return deg;
 	}
-	
+
+	boolean degLessThanTwo(int v) {
+            Debug.check(x[v] < 0);
+            int deg = 0;
+            for (int u : adj[v]) if (x[u] < 0) {
+                deg++;
+                if (deg == 3) return false;
+            }
+            return true;
+        }
+        
 	int restore[];
 	
 	void set(int v, int a) {
+		if (newSetMode == true) {
+			Debug.check(x[v] < 0);
+			crt += a;
+			x[v] = a;
+			restore[--rn] = v;
+			if (a == 1) {
+				for (int u : adj[v]) if (x[u] < 0) {
+					deg[u]--;
+					deque.add(u);
+				} 
+			}
+			if (a == 0) {
+				for (int u : adj[v]) if (x[u] < 0) {
+					x[u] = 1;
+					crt++;
+					restore[--rn] = u;
+					for (int k : adj[u]) if (x[k] < 0) {
+                                                deg[k]--;
+						deque.add(k);
+					} 
+				}
+			}
+			return;
+		}
 		Debug.check(x[v] < 0);
 		crt += a;
 		x[v] = a;
@@ -118,9 +246,9 @@ public class VCSolver {
 	
 	abstract class Modified {
 		
-		int add;
+		int add;//additional Minimum vertex cover
 		int[] removed;
-		int[] vs;
+		int[] vs;//what is vs？
 		int[][] oldAdj;
 		
 		Modified(int add, int[] removed, int[] vs, int[][] newAdj) {
@@ -148,7 +276,9 @@ public class VCSolver {
 		void restore() {
 			crt -= add;
 			rn += removed.length;
-			for (int v : removed) x[v] = -1;
+			for (int v : removed) {
+				x[v] = -1;
+			}
 			for (int i = 0; i < vs.length; i++) {
 				adj[vs[i]] = oldAdj[i];
 				int inV = in[vs[i]], outV = out[vs[i]];
@@ -238,7 +368,7 @@ public class VCSolver {
 	int[] modTmp;
 	
 	void fold(int[] S, int[] NS) {
-		Debug.check(NS.length == S.length + 1);
+		Debug.check(NS.length == S.length + 1);//what is S
 		int[] removed = new int[S.length * 2];
 		for (int i = 0; i < S.length; i++) removed[i] = S[i];
 		for (int i = 0; i < S.length; i++) removed[S.length + i] = NS[1 + i];
@@ -251,6 +381,7 @@ public class VCSolver {
 			Debug.check(!used.get(v));
 			for (int u : adj[v]) if (x[u] < 0 && used.add(u)) {
 				tmp[p++] = u;
+
 			}
 		}
 		int[][] newAdj = new int[p + 1][];
@@ -334,6 +465,7 @@ public class VCSolver {
 				crt -= x[v];
 				x[v] = -1;
 				rn++;
+//                                deg[v] = deg(v);//restore deg as well
 			} else {
 				modifieds[--modifiedN].restore();
 			}
@@ -513,7 +645,7 @@ public class VCSolver {
 	boolean fold2Reduction() {
 		try (Stat stat = new Stat("reduce_fold2")) {
 			int oldn = rn;
-			int[] tmp = level;
+			int[] tmp = level;//what is level
 			loop : for (int v = 0; v < n; v++) if (x[v] < 0) {
 				int p = 0;
 				for (int u : adj[v]) if (x[u] < 0) {
@@ -535,33 +667,33 @@ public class VCSolver {
 	
 	boolean twinReduction() {
 		try (Stat stat = new Stat("reduce_twin")) {
-			int remaining_nodes = rn;
+			int oldn = rn;
 			int[] used = iter;
-			int adj_id = 0;
-			// creating a list for storing v's neighbours to refer back to them when need be
-			int[] neighbors = new int[3];
+			int uid = 0;
+			int[] NS = new int[3];
 			for (int i = 0; i < n; i++) used[i] = 0;
-			// for every node, if it's not determined whether or not it's going to be in the vc and its degree = 3
 			loop : for (int v = 0; v < n; v++) if (x[v] < 0 && deg(v) == 3) {
-				int neighbor_order = 0;
-				// look at v's adjacents and check them only if undetermined yet
+				int p = 0;
 				for (int u : adj[v]) if (x[u] < 0) {
-					neighbors[neighbor_order++] = u;
-					adj_id++;
-					// check adjacents of adjacents, not including the original v: if undetermined 
+					NS[p++] = u;
+					uid++;
 					for (int w : adj[u]) if (x[w] < 0 && w != v) {
-						// if u is v's first neighbour
-						if (neighbor_order == 1) used[w] = adj_id;
-						else if (used[w] == adj_id - 1) {
+						if (p == 1) used[w] = uid;
+						else if (used[w] == uid - 1) {
 							used[w]++;
-							// is w a twin for v?
-							if (neighbor_order == 3 && deg(w) == 3) {
-								adj_id++;
-								for (int z : neighbors) used[z] = adj_id;
+							if (p == 3 && deg(w) == 3) {
+								uid++;
+								for (int z : NS) used[z] = uid;
 								boolean ind = true;
-								for (int z : neighbors) for (int a : adj[z]) if (x[a] < 0 && used[a] == adj_id) ind = false;
+								for (int z : NS) for (int a : adj[z]) if (x[a] < 0 && used[a] == uid) ind = false;
 								if (ind) {
-									fold(new int[]{v, w}, neighbors.clone());
+									fold(new int[]{v, w}, NS.clone());//changed fold
+//                                                                        for (int k :adj[v]) if (x[k] < 0) {
+//                                                                            deg[k] = deg(k);
+//                                                                        }
+//                                                                        for (int k :adj[w]) if (x[k] < 0) {
+//                                                                            deg[k] = deg(k);
+//                                                                        }
 								} else {
 									set(v, 0);
 									set(w, 0);
@@ -572,9 +704,9 @@ public class VCSolver {
 					}
 				}
 			}
-			if (debug >= 3 && depth <= maxDepth && remaining_nodes != rn) debug("twin: %d -> %d%n", remaining_nodes, rn);
-			if (remaining_nodes != rn) Stat.count("reduceN_twin", remaining_nodes - rn);
-			return remaining_nodes != rn;
+			if (debug >= 3 && depth <= maxDepth && oldn != rn) debug("twin: %d -> %d%n", oldn, rn);
+			if (oldn != rn) Stat.count("reduceN_twin", oldn - rn);
+			return oldn != rn;
 		}
 	}
 	
@@ -695,54 +827,242 @@ public class VCSolver {
 			return oldn != rn;
 		}
 	}
-	
+	boolean unconfinedReductionHelper() {
+		try (Stat stat = new Stat("reduce_deg1")) {
+			int vCounter = 0;
+			int effective = 0;
+			int oldn = rn;
+			int[] NS = level;
+			int[] tmp = level;
+			if (!newSetMode) {
+				for (int v = 0; v < n; v++) if (x[v] < 0) {
+					deg[v] = n == rn ? adj[v].length : deg(v);
+					deque.add(v);
+//                                        Debug.checkDeg(deg[v],deg(v),824);
+				}
+			}
+			while (!deque.isEmpty()) {
+                                
+				mainLoop:while (!deque.isDegEmpty()) {
+                                    
+					int v = deque.degV();
+					// vCounter++;
+					if (x[v] >= 0) {
+                                            continue;
+					}
+//                                        Debug.checkDeg(deg[v],deg(v),837);
+					if (deg(v) <= 1) {//changed to deg(v)
+                                            if (!newSetMode) {
+                                                for (int u : adj[v]) if (x[u] < 0) {
+                                                    for (int w : adj[u]) if (x[w] < 0) {
+                                                        if (deg[w] > 0) {
+                                                            
+                                                            deg[w]--;
+                                                        }
+//                                                         Debug.checkDeg(deg[w],deg(w) - 1,844);
+                                                        deque.add(w);
+                                                    }
+                                                }
+                                            }
+                                            set(v, 0);
+						// effective++;
+					}
+//                                        Debug.checkDeg(deg[v],deg(v) - 1,854);
+					else {
+						int p = 0;
+						for (int u : adj[v]) if (x[u] < 0) {
+							tmp[p++] = u;
+							if (p > 2) continue mainLoop;
+						}
+						if (p < 2) continue mainLoop;
+                                                for (int u : adj[tmp[0]]) {
+                                                    if (u == tmp[1]) {
+                                                        if (!newSetMode) {
+                                                            for (int k : adj[tmp[0]]) if (x[k] < 0) {
+                                                                if (k == tmp[1]) continue;
+                                                                    deg[k]--; 
+                                                                    deque.add(k);
+//                                                                    Debug.checkDeg(deg[k],deg(k) - 1,824);
+                                                            }
+                                                            for (int k : adj[tmp[1]]) if (x[k] < 0) {
+                                                                if (k == tmp[0]) continue;
+                                                                    deg[k]--; 
+                                                                    deque.add(k);
+//                                                                    Debug.checkDeg(deg[k],deg(k) - 1,824);
+                                                            }
+                                                        }
+                                                        set(v, 0);
+							// effective++;
+							continue mainLoop;
+                                                    }
+                                                }
+                                                used.clear();
+                                                int total = 0;
+                                                for (int doubleN: adj[tmp[0]]) if (x[doubleN] < 0) {
+                                                    if (used.add(doubleN)) {
+                                                        total++;
+                                                    }
+                                                    else {
+                                                        deg[doubleN]--;
+                                                        deque.add(doubleN);
+                                                    }
+                                                }
+                                                for (int doubleN: adj[tmp[1]]) if (x[doubleN] < 0) {
+                                                    if (used.add(doubleN)) {
+                                                        total++;
+                                                    }
+                                                    else {
+                                                        deg[doubleN]--;
+                                                        deque.add(doubleN);
+                                                    }
+                                                }
+						fold(new int[]{v}, copyOf(tmp, 2));  
+                                                for (int k :adj[v]) if (x[k] < 0) {
+                                                    deque.add(k);
+//                                                    deg[k] = total - 1;
+//                                                    Debug.checkDeg(deg[k],deg(k),907);
+                                                }                                              
+					}
+				}
+                                if (!deque.isUnconEmpty()) {
+					used.clear();
+					int v = deque.unConV();
+					// vCounter++;
+					if (v == -1) {
+						continue;
+					}
+					used.add(v);//used store v from S and all v's neighbor
+					if (x[v] >= 0) {
+						continue;
+					}
+					int p = 1, size = 0;//the size of neighbors of v from S, p is the size of S set in the paper
+					for (int u : adj[v]) if (x[u] < 0) {
+						used.add(u);//added neighbors of v to used
+						NS[size++] = u;//NS[] stores all the neighbors for vertices in S
+						iter[u] = 1;
+					}
+					boolean ok = false;
+					loop : while (!ok) {
+						ok = true;
+						for (int i = 0; i < size; i++) {//traverse v's neighbors
+							int u = NS[i];
+							if (iter[u] != 1) continue;
+							int z = -1;
+							for (int w : adj[u]) if (x[w] < 0 && !used.get(w)) {//get the neighbor of u
+								if (z >= 0) {//check whether there are more than 2 N(V)/N[S]
+									z = -2;
+									break;
+								}
+								z = w;
+							}
+							if (z == -1) {//v is unconfined 
+								if (REDUCTION >= 3) {
+									int[] qs = que;
+									int q = 0;
+									qs[q++] = 1;
+									for (int w : adj[v]) if (x[w] < 0) qs[q++] = w;
+									packing.add(copyOf(qs, q));
+								}
+								if (!newSetMode) {
+									for (int k : adj[v]) if (x[k] < 0) {
+                                                                            if (deg[k] > 0) {
+                                                                                deg[k]--;
+                                                                            }
+                                                                            deque.add(k);
+									}
+								}
+//								effective++;
+								set(v, 1);
+//                                                                Debug.checkDeg(deg[v],deg(v),961);                                                  debug.checkDeg(deg[k],deg(k),907);
+
+								break loop;
+							}
+							else if (z >= 0) {//N(V)/N[S] is one
+								ok = false;
+								used.add(z);//add z to used hashmap
+								p++;
+								for (int w : adj[z]) if (x[w] < 0) {
+									if (used.add(w)) {
+										NS[size++] = w;
+										iter[w] = 1;
+									} else {
+										iter[w]++;// |N(S) n S| > 1
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			// if (vCounter > 0) {
+			// 	System.out.println(1.0*effective/vCounter);
+			// }
+			if (debug >= 3 && depth <= maxDepth && oldn != rn) debug("deg1: %d -> %d%n", oldn, rn);
+			if (oldn != rn) {
+				Stat.count("reduceN_deg1", oldn - rn);
+			}
+			return oldn != rn;
+		}
+	}
 	boolean unconfinedReduction() {
 		try (Stat stat = new Stat("reduce_unconfined")) {
 			int oldn = rn;
-			int[] NS = level, deg = iter;
+			int[] NS = level, deg = iter; 
 			for (int v = 0; v < n; v++) if (x[v] < 0) {
 				used.clear();
-				used.add(v);
-				int p = 1, size = 0;
+				used.add(v);//used store v from S and all v's neighbor
+				int p = 1, size = 0;//the size of neighbors of v from S, p is the size of S set in the paper
 				for (int u : adj[v]) if (x[u] < 0) {
-					used.add(u);
-					NS[size++] = u;
+					used.add(u);//added neighbors of v to used
+					NS[size++] = u;//NS[] stores all the neighbors for vertices in S
 					deg[u] = 1;
 				}
 				boolean ok = false;
 				loop : while (!ok) {
 					ok = true;
-					for (int i = 0; i < size; i++) {
+					for (int i = 0; i < size; i++) {//traverse v's neighbors
+						// this.totalUnconfined++;
 						int u = NS[i];
 						if (deg[u] != 1) continue;
 						int z = -1;
-						for (int w : adj[u]) if (x[w] < 0 && !used.get(w)) {
-							if (z >= 0) {
+						for (int w : adj[u]) if (x[w] < 0 && !used.get(w)) {//get the neighbor of u
+							if (z >= 0) {//check whether there are more than 2 N(V)/N[S]
 								z = -2;
 								break;
 							}
 							z = w;
 						}
-						if (z == -1) {
+						// if (z <= 0) {//set to <=0 from < -1
+						// 	this.confinedNeighbors++;
+						// }
+						if (z == -1) {//v is unconfined 
 							if (REDUCTION >= 3) {
 								int[] qs = que;
 								int q = 0;
 								qs[q++] = 1;
-								for (int w : adj[v]) if (x[w] < 0) qs[q++] = w;
+								for (int w : adj[v]) if (x[w] < 0) {
+									qs[q++] = w;
+									deg[w]--;
+								}
 								packing.add(copyOf(qs, q));
 							}
+							// for (int k : adj[v]) if (x[k] < 0) {
+							// 	queue.add(k);
+							// }
 							set(v, 1);
 							break loop;
-						} else if (z >= 0) {
+						}
+						else if (z >= 0) {//N(V)/N[S] is one
+							// this.repeatUnconfined++;
 							ok = false;
-							used.add(z);
+							used.add(z);//add z to used hashmap
 							p++;
 							for (int w : adj[z]) if (x[w] < 0) {
 								if (used.add(w)) {
 									NS[size++] = w;
 									deg[w] = 1;
 								} else {
-									deg[w]++;
+									deg[w]++;// |N(S) n S| > 1
 								}
 							}
 						}
@@ -792,8 +1112,13 @@ public class VCSolver {
 					}
 				}
 			}
+			// unconfinedReductionHelper(queue);
 			if (debug >= 3 && depth <= maxDepth && oldn != rn) debug("unconfined: %d -> %d%n", oldn, rn);
-			if (oldn != rn) Stat.count("reduceN_unconfined", oldn - rn);
+			if (oldn != rn) {
+				// System.err.println(oldn - rn);
+				// System.err.println("current graph size" + rn);
+				Stat.count("reduceN_unconfined", oldn - rn);
+			}
 			return oldn != rn;
 		}
 	}
@@ -878,6 +1203,7 @@ public class VCSolver {
 			return oldn != rn ? 1 : 0;
 		}
 	}
+	
 	
 	void branching(String output_file) {
 		int oldLB = lb;
@@ -965,8 +1291,13 @@ public class VCSolver {
 		while (packing.size() > oldP) packing.remove(packing.size() - 1);
 		lb = oldLB;
 		depth--;
+                long beginCounter = System.currentTimeMillis();
 		restore(pn);
-		if (lb >= opt) return;
+                // counter += System.currentTimeMillis() - beginCounter;
+		if (lb >= opt) {
+//                    counter += System.currentTimeMillis() - beginCounter;
+                    return;
+                }
 		nBranchings++;
 		if (mirrorN == 0) {
 			used.clear();
@@ -983,6 +1314,9 @@ public class VCSolver {
 						tmp[p++] = w;
 						ws[w] = u;
 					}
+                                        if (p < 2) {
+                                            continue;
+                                        }
 					Debug.check(p >= 2);
 					for (int u2 : adj[tmp[1]]) if (x[u2] < 0 && used.get(u2) && u2 != u) {
 						int c = 0;
@@ -1009,7 +1343,9 @@ public class VCSolver {
 		while (packing.size() > oldP) packing.remove(packing.size() - 1);
 		lb = oldLB;
 		depth--;
+		long beginCounter2 = System.currentTimeMillis();
 		restore(pn);
+                // counter += System.currentTimeMillis() - beginCounter2;
 	}
 	
 	int lpLowerBound() {
@@ -1428,7 +1764,6 @@ public class VCSolver {
 		if (debug >= 2 && depth <= maxDepth) debug("lb: %d (%d), %d%n", lb, type, opt);
 		return lb;
 	}
-	
 	void write(long total_time, int size_reduction, String output_file){
 		try{
 			File file = new File(output_file);
@@ -1440,28 +1775,38 @@ public class VCSolver {
 		}
 		
 	}
+	
 	boolean reduce(String output_file) {
-		if (timing)
-			System.out.println("double timing");
 		timing = true;
 		long time1 = System.currentTimeMillis();
 		long deductable_time = 0;
 		int rn_before = rn;
+		long time_check1 = time1;
+		int rn_updated = rn;
+		long time_check2;
+
 		int oldn = rn;
-		
 		for (;;) {
-			if (REDUCTION >= 0) deg1Reduction();
+			current = System.currentTimeMillis();
+			if (timeFrame >= 0) {
+				current = System.currentTimeMillis();
+				if (current - start  >= timeFrame) return true;//To stop running when time expires
+			}
+			if (REDUCTION >= 0 && unconfinedReductionHelper()) continue;
+			// if (REDUCTION >= 0) deg1Reduction();
 			long time_pause = System.currentTimeMillis();
-			if (n > 100 && n * SHRINK >= rn && !outputLP && false){
-				long total_time = (System.currentTimeMillis() - time1) - deductable_time; 
+			
+			if (n > 100 && n * SHRINK >= rn && !outputLP && decompose(output_file)){
+				long total_time = (time_pause - time1) - deductable_time; 
 				int reduction = rn - rn_before;
 				write(total_time, reduction, output_file);
 				timing = false;
 				return true;
 			} 
 			deductable_time +=  (System.currentTimeMillis() - time_pause);
+
 			if (REDUCTION >= 0 && REDUCTION < 2 && dominateReduction()) continue;
-			if (REDUCTION >= 2 && unconfinedReduction()) continue;
+			// if (REDUCTION >= 2 && unconfinedReduction()) {continue;}
 			if (REDUCTION >= 1 && lpReduction()) continue;
 			if (REDUCTION >= 3) {
 				int r = packingReduction();
@@ -1474,7 +1819,7 @@ public class VCSolver {
 				} 
 				if (r > 0) continue;
 			}
-			if (REDUCTION >= 1 && fold2Reduction()) continue;
+			// if (REDUCTION >= 1 && fold2Reduction()) continue;
 			if (REDUCTION >= 2 && twinReduction()) continue;
 			if (REDUCTION >= 2 && funnelReduction()) continue;
 			if (REDUCTION >= 2 && deskReduction()) continue;
@@ -1488,7 +1833,7 @@ public class VCSolver {
 		return false;
 	}
 	
-	void rec(String output_file) {
+	void rec(String output_file) {//RECURSION
 		if (REDUCTION < 3) Debug.check(packing.size() == 0);
 		if (reduce(output_file)) return;
 		if (lowerBound() >= opt) return;
@@ -1499,7 +1844,7 @@ public class VCSolver {
 			reverse();
 			return;
 		}
-		if (decompose(output_file)) return;
+		if (decompose( output_file)) return;
 		branching(output_file);
 	}
 	
@@ -1518,7 +1863,7 @@ public class VCSolver {
 			Debug.check(false);
 		}
 		rootDepth = depth;
-		if (outputLP) {
+		if (outputLP) {//only call reduction once. do not branch
 			if (REDUCTION < 0) {
 				lpReduction();
 			} else {

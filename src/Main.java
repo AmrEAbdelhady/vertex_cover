@@ -23,22 +23,14 @@ public class Main {
 	@Option(abbr = 'o')
 	public static boolean outputLP = false;
 	
-	@Option(abbr = 'p', usage = "Print the minimum vertex cover. The size of VC is in the first line. Each of the following lines contains the vertex ID.")
-	public static boolean printVC = false;
-	
 	@Option(abbr = 'd')
 	public static int debug = 0;
 	
-	int[] vertexID;
-	int[][] adj;
-	
-	void read(String file) {
+	int[][] read(String file) {
 		if (file.endsWith(".dat")) {
 			GraphIO io = new GraphIO();
 			io.read(new File(file));
-			adj = io.adj;
-			vertexID = new int[adj.length];
-			for (int i = 0; i < adj.length; i++) vertexID[i] = i;
+			return io.adj;
 		} else {
 			GraphConverter conv = new GraphConverter();
 			conv.file = file;
@@ -59,14 +51,13 @@ public class Main {
 					throw new RuntimeException(ex);
 				}
 			}
-			adj = conv.adj;
-			vertexID = conv.vertexID;
+			return conv.adj;
 		}
 	}
 	
-	void run(String file, String output_file) {
+	void run(String file, String timeFrame, String output_file) {
 		System.err.println("reading the input graph...");
-		read(file);
+		int[][] adj = read(file);
 		if (debug > 0) Stat.setShutdownHook();
 		int m = 0;
 		for (int i = 0; i < adj.length; i++) m += adj[i].length;
@@ -80,13 +71,30 @@ public class Main {
 		VCSolver.outputLP = outputLP;
 		VCSolver.debug = debug;
 		long start, end;
+		Stat.init();
 		try (Stat stat = new Stat("solve")) {
 			start = System.currentTimeMillis();
+			vc.start = System.currentTimeMillis();//to set start time for the to VCSolver
+			vc.debug = 1;//To print out each reduction rule's performance
+			vc.timeFrame = Long.parseLong(timeFrame);//setting time frame
+			System.err.println(Long.parseLong(timeFrame));
 			vc.solve(output_file);
 			end = System.currentTimeMillis();
 		}
-		System.err.printf("opt = %d, time = %.3f%n", vc.opt, 1e-3 * (end - start));
-		read(file);
+		// String reductionResult = Stat.reductionsResult(file, vc.opt, end, start);//build reductions details
+		// System.out.println(reductionResult);//print reductions details
+		String totalTimeTemp = String.format("%.3f", 1e-3 * (end - start));
+		System.out.print(vc.opt+","+totalTimeTemp+",");
+		// String unconfinedResult = testUnconfinedReduction(end, start, file, VCSolver.totalUnconfined, VCSolver.confinedNeighbors, VCSolver.repeatUnconfined);
+		//System.err.println(unconfinedResult);//print out percentage
+		// String resultFromCmpUnconfiedSpeedAndSize = Stat.comprareSpeedAndReducedSizeUnconfined();
+		// resultFromCmpUnconfiedSpeedAndSize += (" "+"VCsize: " + vc.opt);
+		// System.err.println(resultFromCmpUnconfiedSpeedAndSize);
+		adj = read(file);
+		// System.out.println("unconfinedHelper reduced " + Stat.getCount("reduceN_deg1"));
+        // Stat.stat();
+        // double counter = vc.counter/1000.0;
+        // System.out.println("time spent on restore() && return successfully is " + counter);
 		int sum = 0;
 		for (int i = 0; i < adj.length; i++) {
 			sum += vc.y[i];
@@ -95,23 +103,89 @@ public class Main {
 		}
 		Debug.check(sum == vc.opt);
 		if (debug > 0) {
-			System.err.printf("%d\t%d\t%d\t%.3f\t%d%n", adj.length, m, vc.opt, 1e-3 * (end - start), VCSolver.nBranchings);
+			System.out.printf("%d\t%d\t%d\t%.3f\t%d%n", adj.length, m, vc.opt, 1e-3 * (end - start), VCSolver.nBranchings);
 		}
-		if (printVC) {
-			System.out.println(sum);
-			for (int i = 0; i < adj.length; i++) if (vc.y[i] > 0) {
-				System.out.println(vertexID[i]);
-			}
-		}
+		//reRun(file, timeFrame,vc.y,vc.opt);
+
 	}
 	
 	void debug(Object...os) {
 		System.err.println(deepToString(os));
 	}
+
+// 	void reRun(String file, String timeFrame,int[] y, int opt, String output_file) {
+//         System.err.println("reading the input graph...");
+// 		int[][] adj = read(file);
+// 		if (debug > 0) Stat.setShutdownHook();
+// 		int m = 0;
+// 		for (int i = 0; i < adj.length; i++) m += adj[i].length;
+// 		m /= 2;
+// 		System.err.printf("n = %d, m = %d%n", adj.length, m);
+// 		VCSolver vc = new VCSolver(adj, adj.length);
+// 		VCSolver.nBranchings = 0;
+// 		VCSolver.REDUCTION = reduction;
+// 		VCSolver.LOWER_BOUND = lb;
+// 		VCSolver.BRANCHING = branching;
+// 		VCSolver.outputLP = outputLP;
+// 		VCSolver.debug = debug;
+// 		long start, end;
+// 		Stat.init();
+// 		try (Stat stat = new Stat("solve")) {
+// 			start = System.currentTimeMillis();
+//             vc.y = y;
+//             vc.opt = opt;
+// 			vc.start = System.currentTimeMillis();//to set start time for the to VCSolver
+// 			vc.debug = 1;//To print out each reduction rule's performance
+// 			vc.timeFrame = Long.parseLong(timeFrame);//setting time frame
+// 			System.err.println(Long.parseLong(timeFrame));
+// 			vc.solve(output_file);
+// 			end = System.currentTimeMillis();
+// 		}
+// 		String reductionResult = Stat.reductionsResult(file, vc.opt, end, start);//build reductions details
+// 		// System.out.println(reductionResult);//print reductions details
+// 		String totalTimeTemp = String.format("%.3f", 1e-3 * (end - start));
+// 		System.out.print(vc.opt+","+totalTimeTemp+",");
+// 		// String unconfinedResult = testUnconfinedReduction(end, start, file, VCSolver.totalUnconfined, VCSolver.confinedNeighbors, VCSolver.repeatUnconfined);
+// 		//System.err.println(unconfinedResult);//print out percentage
+// 		String resultFromCmpUnconfiedSpeedAndSize = Stat.comprareSpeedAndReducedSizeUnconfined();
+// 		resultFromCmpUnconfiedSpeedAndSize += (" "+"VCsize: " + vc.opt);
+// 		// System.err.println(resultFromCmpUnconfiedSpeedAndSize);
+// 		adj = read(file);
+// //		System.out.println("unconfinedHelper reduced " + Stat.getCount("reduceN_deg1"));
+// //                Stat.stat();
+// //                double counterRestore = vc.counterRestore/1000.0;
+// //                double counterLB = vc.counterLowerBound/1000.0;
+// //                double counterDec = vc.counterDecomp/1000.0;
+// //                System.out.println("time spent on restore() " + counterRestore);
+// //                System.out.println("time spent on lowerbound() " + counterLB);
+// //                System.out.println("time spent on decompose() " + counterDec);
+// 		int sum = 0;
+// 		for (int i = 0; i < adj.length; i++) {
+// 			sum += vc.y[i];
+// 			Debug.check(vc.y[i] == 0 || vc.y[i] == 1);
+// 			for (int j : adj[i]) Debug.check(vc.y[i] + vc.y[j] >= 1);
+// 		}
+// 		Debug.check(sum == vc.opt);
+// 		if (debug > 0) {
+// 			System.out.printf("%d\t%d\t%d\t%.3f\t%d%n", adj.length, m, vc.opt, 1e-3 * (end - start), VCSolver.nBranchings);
+// 		}
+//         }
+	// public static String testUnconfinedReduction(long end, long start, String file, long totalUnconfined, long confinedNeighbors, long repeatUnconfined) {
+		// StringBuilder sb = new StringBuilder();
+		// String totalTimeTemp = String.format("%.3f", 1e-3 * (end - start));
+		// sb.append(file + ",");
+		// sb.append(totalTimeTemp + ",");
+		// sb.append((long)totalUnconfined + ",");
+		// sb.append((long)confinedNeighbors + ",");
+		// sb.append((long)repeatUnconfined + ",");
+		// sb.append(100*(double)VCSolver.confinedNeighbors/(double)VCSolver.totalUnconfined + ",");
+		// sb.append(100*(double)VCSolver.repeatUnconfined/(double)VCSolver.totalUnconfined);
+		// return sb.toString();
+	// }
 	
 	public static void main(String[] args) {
 		Main main = new Main();
 		args = SetOpt.setOpt(main, args);
-		main.run(args[0],args[1]);
+		main.run(args[0],args[1], args[2]);
 	}
 }
