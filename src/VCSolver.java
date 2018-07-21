@@ -18,10 +18,16 @@ public class VCSolver {
 	public static int LOWER_BOUND = 4;
 	
 	public static int BRANCHING = 2;
+
+	public static int subgraph_id = 1;
 	
 	public static boolean outputLP = true;
 
 	public static boolean timing = false;
+	
+	public static boolean first_time_below_limit = true;
+	public static long time_below_limit = 99999999;
+	public static boolean first_solve_call = true;
 	
 	public static long nBranchings;
 	
@@ -700,23 +706,7 @@ public class VCSolver {
 		try (Stat stat = new Stat("reduce_unconfined")) {
 			int oldn = rn;
 			int[] NS = level, deg = iter;
-
-			long time_check1 = System.currentTimeMillis();
-			int rn_updated = rn;
-			long time_check2;
-
 			for (int v = 0; v < n; v++) if (x[v] < 0) {
-
-				if (v >= n / 10){
-					time_check2 = System.currentTimeMillis();
-					if (time_check2 - time_check1 != 0)
-						if ((rn - rn_updated)/(time_check2 - time_check1) < 5 )
-							break;
-					
-					time_check1 = time_check2;
-					rn_updated = rn;
-				}
-
 				used.clear();
 				used.add(v);
 				int p = 1, size = 0;
@@ -895,7 +885,7 @@ public class VCSolver {
 		}
 	}
 	
-	void branching(String output_file) {
+	void branching(String output_file, String small_graphs) {
 		int oldLB = lb;
 		int v = -1, dv = 0;
 		int[] mirrors = que;
@@ -977,7 +967,7 @@ public class VCSolver {
 			else debug("branch (%d): 1%n", dv);
 		}
 		depth++;
-		rec(output_file);
+		rec(output_file, small_graphs);
 		while (packing.size() > oldP) packing.remove(packing.size() - 1);
 		lb = oldLB;
 		depth--;
@@ -1021,7 +1011,7 @@ public class VCSolver {
 		set(v, 0);
 		if (debug >= 2 && depth <= maxDepth) debug("branch (%d): 0%n", dv);
 		depth++;
-		rec(output_file);
+		rec(output_file, small_graphs);
 		while (packing.size() > oldP) packing.remove(packing.size() - 1);
 		lb = oldLB;
 		depth--;
@@ -1141,7 +1131,7 @@ public class VCSolver {
 		}
 	}
 	
-	boolean decompose(String output_file) {
+	boolean decompose(String output_file, String small_graphs) {
 		int[][] vss;
 		try (Stat stat = new Stat("decompose")) {
 			int[] id = level;
@@ -1288,6 +1278,9 @@ public class VCSolver {
 					sort(adj2[j]);
 				}
 				vcs[i] = new VCSolver(adj2, size[i]);
+				if (! first_time_below_limit){
+					vcs[i].first_time_below_limit = false;
+				}
 				for (int j = 0; j < vs.length; j++) {
 					if (in[vs[j]] >= 0 && pos1[in[vs[j]]] == i && pos2[in[vs[j]]] < vs.length) {
 						vcs[i].in[j] = pos2[in[vs[j]]];
@@ -1395,7 +1388,7 @@ public class VCSolver {
 			}
 			vc.reverse();
 			for (int j = 0; j < vc.N; j++) Debug.check(vc.y[j] == 0 || vc.y[j] == 1);
-			vc.solve(output_file);
+			vc.solve(output_file, small_graphs);
 			sum += vc.opt;
 			for (int j = 0; j < vc.N - 2; j++) {
 				x2[vss2[i][j]] = vc.y[j];
@@ -1456,8 +1449,12 @@ public class VCSolver {
 		}
 		
 	}
-	boolean reduce(String output_file) {
-		
+	boolean reduce(String output_file, String small_graphs) {
+		// if (rn < 50 && first_time_below_limit){
+		// 	first_time_below_limit = false;
+		// 	time_below_limit = System.currentTimeMillis();
+		// 	System.out.print(" now " + '\n');
+		// }
 		timing = true;
 		long time1 = System.currentTimeMillis();
 		long deductable_time = 0;
@@ -1470,7 +1467,7 @@ public class VCSolver {
 
 			if (REDUCTION >= 0) deg1Reduction();
 			long time_pause = System.currentTimeMillis();
-			if (n > 100 && n * SHRINK >= rn && !outputLP && decompose(output_file)){
+			if (n > 100 && n * SHRINK >= rn && !outputLP && decompose(output_file, small_graphs)){
 				long total_time = (time_pause - time1) - deductable_time; 
 				int reduction = rn - rn_before;
 				write(total_time, reduction, output_file);
@@ -1524,9 +1521,14 @@ public class VCSolver {
 		return false;
 	}
 	
-	void rec(String output_file) {
+	void rec(String output_file, String small_graphs) {
+		boolean start_timing = false;
+		long total_time;
+		long time1;
+		int rn_before;
+		
 		if (REDUCTION < 3) Debug.check(packing.size() == 0);
-		if (reduce(output_file)) return;
+		if (reduce(output_file, small_graphs)) return;
 		if (lowerBound() >= opt) return;
 		if (rn == 0) {
 			if (debug >= 2 && rootDepth <= maxDepth) debug("opt: %d -> %d%n", opt, crt);
@@ -1535,8 +1537,43 @@ public class VCSolver {
 			reverse();
 			return;
 		}
-		if (decompose(output_file)) return;
-		branching(output_file);
+		if (decompose(output_file, small_graphs)) return;
+
+		if (rn <= 700 && first_time_below_limit){
+			//System.out.print(" condition is met " + '\n');
+			first_time_below_limit = false;
+			start_timing = true;
+		}
+
+		if (start_timing){
+			//System.out.print("start timing is fine" + '\n');
+			rn_before = rn;
+			time1 = System.currentTimeMillis();
+		
+			branching(output_file, small_graphs);
+
+			total_time = System.currentTimeMillis() - time1;
+
+			if (subgraph_id <= 1000){
+				write_graph(subgraph_id);
+				subgraph_id++;
+			}
+			
+
+			try{
+			File file = new File(small_graphs);
+			FileWriter writer = new FileWriter(file, true);
+			writer.write(String.valueOf(rn_before) + "," + String.valueOf(total_time) + '\n');
+			writer.close();
+			} catch (java.io.IOException e){
+				System.err.println("Unable to open file " );
+			}
+			first_time_below_limit = true;
+		}
+		else{
+
+			branching(output_file, small_graphs);
+		}
 	}
 	
 	void debug(String str, Object...os) {
@@ -1548,7 +1585,16 @@ public class VCSolver {
 		System.err.printf(str, os);
 	}
 	
-	public int solve(String output_file) {
+	public int solve(String output_file, String small_graphs) {
+		// boolean print;
+		// if (first_solve_call){
+		// 	long ttl_time;
+		// 	print = true;
+		// 	first_solve_call = false;
+		// }
+		// else
+		// 	print = false;
+
 		if (LOWER_BOUND >= 2 && REDUCTION <= 0 && !outputLP) {
 			System.err.println("LP/cycle lower bounds require LP reduction.");
 			Debug.check(false);
@@ -1558,14 +1604,116 @@ public class VCSolver {
 			if (REDUCTION < 0) {
 				lpReduction();
 			} else {
-				reduce(output_file);
+				reduce(output_file, small_graphs);
 			}
 			System.out.printf("%.1f%n", crt + rn / 2.0);
+			// if (print){
+			// 	long ttl_time = System.currentTimeMillis() - time_below_limit;
+			// 	System.out.print(" time after graph size hits 5k: " + ttl_time + '\n');
+			// }
 			return opt;
 		}
-		rec(output_file);
+		rec(output_file, small_graphs);
 		if (debug >= 2 && depth <= maxDepth) debug("opt: %d%n", opt);
+		// if (print){
+		// 	long ttl_time = System.currentTimeMillis() - time_below_limit;
+		// 	System.out.print(" time after graph size hits 5k: " + ttl_time + '\n');
+		// }
 		return opt;
 	}
 	
+	void write_graph(int id){
+		int [] new_vertex_numbers = new int [100000000];
+		int holes_num = 0; // to store the number of non-existing vertices so far as we iterate through the vertices
+		for (int i = 0; i < x.length; i++){
+			if (x[i] >= 0){
+				holes_num++;
+				new_vertex_numbers[i] = -1;
+				continue;
+			}
+			new_vertex_numbers[i] = i - holes_num;
+
+		}
+		
+		
+		//File file = new File("/subgraphs/" + String.valueOf(id) + ".graph");
+		//file.createNewFile();
+		//FileWriter writer = new FileWriter("/subgraphs/" + String.valueOf(id) + ".graph", true);
+		
+		try{
+			File file = new File("/subgraphs/" + String.valueOf(id) + ".graph");
+			if (!file.exists())
+				file.createNewFile();
+			FileWriter writer = new FileWriter(file, true);
+			//FileWriter writer = new FileWriter("/subgraphs/" + String.valueOf(id) + ".graph", true);
+
+			for (int j = 0; j < x.length; j++){
+				if (x[j] < 0){
+					boolean not_first_vertex = false;
+					for (int k = 0; k < adj[j].length; k++){
+						if (x[adj[j][k]] < 0){
+							if (not_first_vertex){
+								writer.write(" ");
+							}
+							else
+								not_first_vertex = true;
+							writer.write(String.valueOf(new_vertex_numbers[adj[j][k]] + 1)); 	
+						}		
+					}
+					writer.write('\n');
+				}
+			}
+
+			//writer.write("-------------------------------------" + '\n');
+			writer.close();
+
+		} catch (java.io.IOException e){
+			System.err.println("Unable to open file " );
+		}
+
+	}
+
+	// void write_graph_snap(){
+		
+	// 	int [] new_vertex_numbers = new int [100000000];
+	// 	int holes_num = 0; // to store the number of non-existing vertices so far as we iterate through the vertices
+	// 	for (int i = 0; i < x.length; i++){
+	// 		if (x[i] >= 0){
+	// 			holes_num++;
+	// 			new_vertex_numbers[i] = -1;
+	// 			continue;
+	// 		}
+	// 		new_vertex_numbers[i] = i - holes_num;
+
+	// 	}
+		
+	// 	try{
+	// 		File file = new File(subgraph);
+	// 		FileWriter writer = new FileWriter(file, true);
+		
+
+	// 		for (int j = 0; j < x.length; j++){
+	// 			if (x[j] < 0){
+	// 				//boolean not_first_vertex = false;
+	// 				for (int k = 0; k < adj[j].length; k++){
+	// 					if (x[adj[j][k]] < 0){
+							
+							
+	// 						writer.write( String.valueOf(new_vertex_numbers[j] + 1) + " " + String.valueOf(new_vertex_numbers[adj[j][k]] + 1) + '\n');
+							
+						
+	// 					}		
+	// 				}
+					
+	// 			}
+	// 		}
+
+	// 		writer.write("-------------------------------------" + '\n');
+	// 		writer.close();
+
+	// 	} catch (java.io.IOException e){
+	// 		System.err.println("Unable to open file " );
+	// 	}
+
+	// }
 }

@@ -64,7 +64,7 @@ public class Main {
 		}
 	}
 	
-	void run(String file, String output_file) {
+	void run(String file, String output_file, String small_graphs) {
 		System.err.println("reading the input graph...");
 		read(file);
 		if (debug > 0) Stat.setShutdownHook();
@@ -82,7 +82,7 @@ public class Main {
 		long start, end;
 		try (Stat stat = new Stat("solve")) {
 			start = System.currentTimeMillis();
-			vc.solve(output_file);
+			vc.solve(output_file, small_graphs);
 			end = System.currentTimeMillis();
 		}
 		System.err.printf("opt = %d, time = %.3f%n", vc.opt, 1e-3 * (end - start));
@@ -112,6 +112,6 @@ public class Main {
 	public static void main(String[] args) {
 		Main main = new Main();
 		args = SetOpt.setOpt(main, args);
-		main.run(args[0],args[1]);
+		main.run(args[0],args[1], args[2]);
 	}
 }
